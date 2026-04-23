@@ -10,6 +10,8 @@ import {
 import Image from "next/image"
 import { MouseTrail } from "@/components/landing/mouse-trail"
 import { AnimatedLogo } from "@/components/landing/animated-logo"
+import { InteractiveFeatureCards } from "@/components/landing/interactive-feature-cards"
+import { EnhancedModules } from "@/components/landing/enhanced-modules"
 
 // Hook para tracking do mouse com parallax
 function useMousePosition() {
@@ -465,8 +467,24 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Como funciona */}
-      <section id="como-funciona" className="relative z-10 py-32 px-6">
+      {/* Como funciona - Cards Interativos Premium */}
+      <section id="como-funciona" className="relative z-10 py-32 px-6 overflow-hidden">
+        {/* Background dinamico que reage ao scroll */}
+        <div className="absolute inset-0 -z-10">
+          <motion.div
+            className="absolute inset-0"
+            animate={{
+              background: [
+                "radial-gradient(ellipse at 20% 50%, rgba(16, 185, 129, 0.08) 0%, transparent 50%)",
+                "radial-gradient(ellipse at 80% 50%, rgba(6, 182, 212, 0.08) 0%, transparent 50%)",
+                "radial-gradient(ellipse at 50% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%)",
+                "radial-gradient(ellipse at 20% 50%, rgba(16, 185, 129, 0.08) 0%, transparent 50%)",
+              ],
+            }}
+            transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+          />
+        </div>
+
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <motion.p
@@ -482,70 +500,31 @@ export default function LandingPage() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: 0.1 }}
-              className="text-4xl md:text-5xl font-bold"
+              className="text-4xl md:text-5xl font-bold mb-4"
             >
               <span className="text-white">Tudo em um. </span>
               <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Simples assim.</span>
             </motion.h2>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[
-              { icon: Users, title: "Organize leads", desc: "Capture, qualifique e acompanhe cada oportunidade" },
-              { icon: ListTodo, title: "Gerencie operacoes", desc: "Tarefas, projetos e fluxos automatizados" },
-              { icon: Wallet, title: "Controle financeiro", desc: "Receitas, despesas e fluxo de caixa" },
-              { icon: Bot, title: "Receba ajuda da IA", desc: "Sugestoes, automacoes e insights" },
-            ].map((item, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1 }}
-                className="relative p-6 rounded-2xl border border-white/5 bg-white/[0.02]"
-              >
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-4">
-                  <item.icon className="w-5 h-5 text-indigo-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-white mb-2">{item.title}</h3>
-                <p className="text-sm text-white/40">{item.desc}</p>
-                <div className="absolute top-6 right-6 text-4xl font-bold text-white/5">0{i + 1}</div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Modulos */}
-      <section className="relative z-10 py-32 px-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              className="text-sm text-indigo-400 uppercase tracking-widest mb-4"
+              transition={{ delay: 0.2 }}
+              className="text-white/40 text-sm"
             >
-              Modulos principais
+              Passe o mouse sobre cada card para ver a demonstracao
             </motion.p>
-            <motion.h2
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.1 }}
-              className="text-4xl md:text-5xl font-bold"
-            >
-              <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Substitua </span>
-              <span className="text-white">5 ferramentas </span>
-              <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">por uma.</span>
-            </motion.h2>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {MODULES.map((module, i) => (
-              <ModuleCard key={i} {...module} delay={i * 0.1} />
-            ))}
-          </div>
+          {/* Cards Interativos com Demonstracao */}
+          <InteractiveFeatureCards />
+        </div>
+      </section>
+
+      {/* Modulos - Substitua 5 ferramentas */}
+      <section className="relative z-10 py-32 px-6">
+        <div className="max-w-6xl mx-auto">
+          <EnhancedModules />
         </div>
       </section>
 
