@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Users, ListTodo, Wallet, Bot, ArrowDown, TrendingUp, CheckCircle2, Send, Sparkles } from "lucide-react"
 
@@ -436,9 +436,24 @@ function EnergyConnector({ isActive, color }: { isActive: boolean; color: string
 
 // Componente principal
 export function InteractiveFeatureCards() {
-  const [activeFeature, setActiveFeature] = useState<string | null>(null)
+  // Estado para feature ativa (hover temporario ou selecionada por click)
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
+  const [hoveredFeature, setHoveredFeature] = useState<string | null>(null)
+  const [isTouchDevice, setIsTouchDevice] = useState(false)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Detecta se e dispositivo touch
+  useEffect(() => {
+    const checkTouch = () => {
+      setIsTouchDevice("ontouchstart" in window || navigator.maxTouchPoints > 0)
+    }
+    checkTouch()
+    window.addEventListener("touchstart", () => setIsTouchDevice(true), { once: true })
+  }, [])
+
+  // A feature ativa e a selecionada (click) ou a que esta com hover
+  const activeFeature = selectedFeature || hoveredFeature
 
   // Track mouse position for background effect
   useEffect(() => {
@@ -453,6 +468,29 @@ export function InteractiveFeatureCards() {
     window.addEventListener("mousemove", handleMouseMove)
     return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [])
+
+  // Handler para click/tap no card
+  const handleCardClick = useCallback((featureId: string) => {
+    // Se ja esta selecionado, deseleciona (toggle)
+    if (selectedFeature === featureId) {
+      setSelectedFeature(null)
+    } else {
+      setSelectedFeature(featureId)
+    }
+  }, [selectedFeature])
+
+  // Handler para hover (apenas em desktop)
+  const handleMouseEnter = useCallback((featureId: string) => {
+    if (!isTouchDevice) {
+      setHoveredFeature(featureId)
+    }
+  }, [isTouchDevice])
+
+  const handleMouseLeave = useCallback(() => {
+    if (!isTouchDevice) {
+      setHoveredFeature(null)
+    }
+  }, [isTouchDevice])
 
   const renderDemo = () => {
     switch (activeFeature) {
@@ -478,10 +516,23 @@ export function InteractiveFeatureCards() {
         }}
       />
 
+      {/* Instrucao para usuario - adaptada para dispositivo */}
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="text-center text-white/30 text-xs mb-6"
+      >
+        {isTouchDevice 
+          ? "Toque em um card para ver a demonstracao" 
+          : "Passe o mouse ou clique em um card para ver a demonstracao"
+        }
+      </motion.p>
+
       {/* Grid de cards */}
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
         {FEATURES.map((feature, i) => {
           const isActive = activeFeature === feature.id
+          const isSelected = selectedFeature === feature.id
           const Icon = feature.icon
 
           return (
@@ -491,9 +542,19 @@ export function InteractiveFeatureCards() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: i * 0.1 }}
-              onMouseEnter={() => setActiveFeature(feature.id)}
-              onMouseLeave={() => setActiveFeature(null)}
-              className="relative cursor-pointer"
+              onMouseEnter={() => handleMouseEnter(feature.id)}
+              onMouseLeave={handleMouseLeave}
+              onClick={() => handleCardClick(feature.id)}
+              className="relative cursor-pointer select-none"
+              role="button"
+              tabIndex={0}
+              aria-pressed={isSelected}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  handleCardClick(feature.id)
+                }
+              }}
             >
               {/* Card */}
               <motion.div
@@ -502,15 +563,34 @@ export function InteractiveFeatureCards() {
                   y: isActive ? -5 : 0,
                 }}
                 transition={{ duration: 0.3 }}
-                className={`relative p-6 rounded-2xl border transition-all duration-500 ${
-                  isActive 
-                    ? "border-white/20 bg-gradient-to-b from-white/[0.08] to-white/[0.02]" 
-                    : "border-white/5 bg-white/[0.02]"
+                className={`relative p-6 rounded-2xl border transition-all duration-300 ${
+                  isSelected 
+                    ? "border-white/30 bg-gradient-to-b from-white/[0.12] to-white/[0.04]" 
+                    : isActive 
+                      ? "border-white/20 bg-gradient-to-b from-white/[0.08] to-white/[0.02]" 
+                      : "border-white/5 bg-white/[0.02] hover:border-white/10"
                 }`}
                 style={{
-                  boxShadow: isActive ? `0 0 40px ${feature.color}20, 0 0 80px ${feature.color}10` : "none",
+                  boxShadow: isSelected 
+                    ? `0 0 50px ${feature.color}30, 0 0 100px ${feature.color}15, inset 0 1px 0 rgba(255,255,255,0.1)` 
+                    : isActive 
+                      ? `0 0 40px ${feature.color}20, 0 0 80px ${feature.color}10` 
+                      : "none",
                 }}
               >
+                {/* Indicador de selecionado (ring pulsante) */}
+                {isSelected && (
+                  <motion.div
+                    className="absolute inset-0 rounded-2xl border-2 pointer-events-none"
+                    style={{ borderColor: feature.color }}
+                    animate={{ 
+                      opacity: [0.5, 1, 0.5],
+                      scale: [1, 1.02, 1],
+                    }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                  />
+                )}
+
                 {/* Glow overlay */}
                 <motion.div
                   className="absolute inset-0 rounded-2xl opacity-0"
@@ -523,13 +603,30 @@ export function InteractiveFeatureCards() {
 
                 {/* Icone */}
                 <motion.div
-                  animate={{ scale: isActive ? 1.1 : 1 }}
+                  animate={{ 
+                    scale: isActive ? 1.1 : 1,
+                    rotate: isSelected ? [0, 5, -5, 0] : 0,
+                  }}
+                  transition={{ 
+                    scale: { duration: 0.3 },
+                    rotate: { duration: 0.5, delay: 0.1 },
+                  }}
                   className={`relative w-10 h-10 rounded-xl flex items-center justify-center mb-4 bg-gradient-to-br ${feature.gradient}`}
                   style={{ 
                     boxShadow: isActive ? `0 0 20px ${feature.color}40` : "none" 
                   }}
                 >
                   <Icon className="w-5 h-5" style={{ color: feature.color }} />
+                  
+                  {/* Pulse indicator quando selecionado */}
+                  {isSelected && (
+                    <motion.div
+                      className="absolute inset-0 rounded-xl"
+                      style={{ backgroundColor: feature.color }}
+                      animate={{ scale: [1, 1.5, 1.5], opacity: [0.3, 0, 0] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                    />
+                  )}
                 </motion.div>
 
                 {/* Titulo e descricao */}
@@ -537,55 +634,120 @@ export function InteractiveFeatureCards() {
                 <p className="text-sm text-white/40">{feature.desc}</p>
 
                 {/* Numero do card */}
-                <div className="absolute top-6 right-6 text-4xl font-bold text-white/5">
+                <div 
+                  className="absolute top-6 right-6 text-4xl font-bold transition-colors duration-300"
+                  style={{ color: isActive ? `${feature.color}30` : "rgba(255,255,255,0.05)" }}
+                >
                   0{i + 1}
                 </div>
-              </motion.div>
 
-              {/* Conector energetico */}
-              <EnergyConnector isActive={isActive} color={feature.color} />
+                {/* Badge de ativo (mobile) */}
+                <AnimatePresence>
+                  {isSelected && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      className="absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: feature.color }}
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-white" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
             </motion.div>
           )
         })}
       </div>
 
-      {/* Area de demonstracao */}
-      <AnimatePresence mode="wait">
-        {activeFeature && (
-          <motion.div
-            key={activeFeature}
-            initial={{ opacity: 0, y: 20, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: "auto" }}
-            exit={{ opacity: 0, y: -10, height: 0 }}
-            transition={{ duration: 0.4, ease: "easeOut" }}
-            className="mt-8 overflow-hidden"
-          >
-            <div 
-              className="p-6 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.05] to-transparent backdrop-blur-sm"
-              style={{
-                boxShadow: `0 0 60px ${activeFeatureData?.color}10`,
-              }}
-            >
-              {/* Header da demonstracao */}
-              <div className="flex items-center gap-3 mb-4 pb-4 border-b border-white/5">
-                <div 
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ backgroundColor: `${activeFeatureData?.color}20` }}
-                >
-                  {activeFeatureData && <activeFeatureData.icon className="w-4 h-4" style={{ color: activeFeatureData.color }} />}
-                </div>
-                <div>
-                  <h4 className="text-sm font-medium text-white">{activeFeatureData?.title}</h4>
-                  <p className="text-xs text-white/40">Demonstracao interativa</p>
-                </div>
-              </div>
+      {/* Conector energetico e demonstracao */}
+      <div className="flex flex-col items-center">
+        <EnergyConnector 
+          isActive={!!activeFeature} 
+          color={activeFeatureData?.color || "#6366f1"} 
+        />
 
-              {/* Conteudo da demonstracao */}
-              {renderDemo()}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        {/* Area de demonstracao */}
+        <AnimatePresence mode="wait">
+          {activeFeature && (
+            <motion.div
+              key={activeFeature}
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.95 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="w-full max-w-2xl"
+            >
+              {/* Container da demonstracao */}
+              <div 
+                className="relative p-6 rounded-2xl border backdrop-blur-sm"
+                style={{
+                  backgroundColor: "rgba(0, 0, 0, 0.4)",
+                  borderColor: `${activeFeatureData?.color}30`,
+                  boxShadow: `0 0 60px ${activeFeatureData?.color}10, inset 0 1px 0 rgba(255,255,255,0.05)`,
+                }}
+              >
+                {/* Header da demonstracao */}
+                <div className="flex items-center gap-3 mb-4 pb-3 border-b border-white/10">
+                  <div 
+                    className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: `${activeFeatureData?.color}20` }}
+                  >
+                    {activeFeatureData && <activeFeatureData.icon className="w-4 h-4" style={{ color: activeFeatureData.color }} />}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-white">{activeFeatureData?.title}</h4>
+                    <p className="text-xs text-white/40">Demonstracao interativa</p>
+                  </div>
+                  
+                  {/* Indicador de ao vivo */}
+                  <div className="ml-auto flex items-center gap-2">
+                    <motion.div
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: activeFeatureData?.color }}
+                      animate={{ opacity: [1, 0.5, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                    />
+                    <span className="text-[10px] text-white/40 uppercase tracking-wider">Ao vivo</span>
+                  </div>
+                </div>
+
+                {/* Conteudo da demonstracao */}
+                {renderDemo()}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Placeholder quando nada esta selecionado */}
+        <AnimatePresence>
+          {!activeFeature && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="w-full max-w-2xl mt-8"
+            >
+              <div className="flex flex-col items-center justify-center py-12 px-6 rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
+                <motion.div
+                  animate={{ y: [0, -5, 0] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center mb-4"
+                >
+                  <Sparkles className="w-6 h-6 text-white/20" />
+                </motion.div>
+                <p className="text-sm text-white/30 text-center">
+                  {isTouchDevice 
+                    ? "Toque em um dos cards acima para ver a demonstracao" 
+                    : "Selecione um dos cards acima para ver a demonstracao em acao"
+                  }
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   )
 }
