@@ -18,8 +18,8 @@ const QUICK_ACTIONS = [
   { label: "Criar uma tarefa", icon: "task" },
   { label: "Registrar uma receita", icon: "finance" },
   { label: "Abrir CRM", icon: "navigate" },
-  { label: "Conectar WhatsApp", icon: "integration" },
-  { label: "Ver integracoes", icon: "integration" },
+  { label: "Qual meu saldo?", icon: "finance" },
+  { label: "Listar tarefas", icon: "task" },
 ]
 
 const SHORTCUT_LINKS = [
@@ -67,14 +67,12 @@ export default function AssistentePage() {
         }),
       })
 
-      if (!response.ok) throw new Error("Erro na resposta")
-
       const data = await response.json()
       
       const assistantMessage: Message = {
         id: data.id || crypto.randomUUID(),
         role: "assistant",
-        content: data.content,
+        content: data.content || "Desculpe, nao consegui processar sua mensagem.",
         navigate: data.navigate,
       }
 
@@ -112,12 +110,20 @@ export default function AssistentePage() {
     setMessages([])
   }
 
+  // Renderizar markdown simples (negrito)
+  function renderMarkdown(text: string) {
+    if (!text) return null
+    return text.split(/\*\*(.*?)\*\*/g).map((part, i) => 
+      i % 2 === 1 ? <strong key={i} className="font-semibold">{part}</strong> : part
+    )
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Assistente IA</h1>
+          <h1 className="text-2xl font-bold text-foreground">Assistente OpsBot</h1>
           <p className="text-muted-foreground">Converse com o OpsBot para obter ajuda e navegar na plataforma</p>
         </div>
         {messages.length > 0 && (
@@ -141,7 +147,7 @@ export default function AssistentePage() {
                 Ola! Sou o OpsBot
               </h3>
               <p className="text-muted-foreground mb-6 max-w-md">
-                Posso ajudar voce a navegar, gerenciar leads, tarefas, financas e configurar integracoes.
+                Posso ajudar voce a navegar, gerenciar leads, tarefas, financas e muito mais.
                 Experimente dizer &quot;abrir CRM&quot; ou pergunte sobre qualquer modulo!
               </p>
               
@@ -180,12 +186,11 @@ export default function AssistentePage() {
                     }`}
                   >
                     <p className="text-sm whitespace-pre-wrap">
-                      {message.content.split(/\*\*(.*?)\*\*/g).map((part, i) => 
-                        i % 2 === 1 ? <strong key={i}>{part}</strong> : part
-                      )}
+                      {renderMarkdown(message.content)}
                     </p>
                     {message.navigate && (
-                      <p className="text-xs mt-2 opacity-70">
+                      <p className="text-xs mt-2 opacity-70 flex items-center gap-1">
+                        <Spinner className="w-3 h-3" />
                         Navegando em 1.5 segundos...
                       </p>
                     )}

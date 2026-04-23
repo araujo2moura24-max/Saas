@@ -1,109 +1,301 @@
-// OpsBot - Assistente Operacional Inteligente com IA Real
+// OpsBot - Assistente Operacional Local (sem OpenAI)
 
-import { streamText, convertToModelMessages } from 'ai'
+import { detectIntent, extractNavigationTarget, extractModuleForExplanation, FLOW_FIELDS, processFieldValue, NAVIGATION_TARGETS, type Intent, type FlowState } from '@/lib/opsbot/engine'
+import { createLead, listLeads, countLeads, createFinance, getBalance, listFinances, createTask, listTasks, countTasks, getCompany } from '@/lib/opsbot/actions'
 
-export const maxDuration = 60
+export const maxDuration = 30
 
-// System prompt rico com contexto completo do OpsCore
-const SYSTEM_PROMPT = `Você é o **OpsBot**, o assistente de inteligência artificial do OpsCore - um sistema operacional empresarial completo.
+// Armazenamento temporario de fluxos (em producao, usar Redis ou similar)
+const flowStates = new Map<string, FlowState>()
 
-## Sua Personalidade
-- Você é prestativo, objetivo e profissional, mas com um toque de simpatia
-- Responde em português brasileiro, de forma clara e direta
-- Usa formatação markdown para organizar informações (negrito, listas, etc.)
-- Se não souber algo, seja honesto
+// Respostas padrao
+const RESPONSES: Record<string, string | ((params?: Record<string, string>) => string)> = {
+  greeting: () => {
+    const hour = new Date().getHours()
+    let greeting = 'Ola'
+    if (hour < 12) greeting = 'Bom dia'
+    else if (hour < 18) greeting = 'Boa tarde'
+    else greeting = 'Boa noite'
+    
+    return `${greeting}! Sou o **OpsBot**, seu assistente operacional.
 
-## Sobre o OpsCore
-O OpsCore é um sistema operacional empresarial que centraliza:
+Posso ajudar voce a:
+- **Criar registros**: leads, receitas, despesas, tarefas
+- **Consultar dados**: saldo, numero de leads, tarefas pendentes
+- **Navegar**: "abrir CRM", "ir para financeiro"
 
-1. **CRM (Gestão de Clientes)** - Funil de vendas, cadastro de leads
-2. **Financeiro** - Controle de receitas e despesas
-3. **Operações (Tarefas)** - Gestão de atividades
-4. **Integrações** - WhatsApp Business, etc.
-5. **Dashboard** - Visão geral de métricas
+O que voce gostaria de fazer?`
+  },
+  
+  help: `Posso te ajudar com varias coisas! Experimente:
 
-## Módulos Disponíveis
-- Dashboard: /dashboard
-- CRM: /dashboard/crm
-- Financeiro: /dashboard/financeiro
-- Operações: /dashboard/operacoes
-- Integrações: /dashboard/integracoes
-- Conversas: /dashboard/conversas
-- Configurações: /dashboard/configuracoes
+**CRM:**
+- "criar lead" - cadastrar novo lead
+- "listar leads" - ver seus leads
+- "quantos leads tenho"
 
-Ajude o usuário a ser mais produtivo!`
+**Financeiro:**
+- "registrar receita" - nova entrada
+- "registrar despesa" - nova saida
+- "qual meu saldo"
+
+**Tarefas:**
+- "criar tarefa" - nova atividade
+- "listar tarefas" - ver pendentes
+- "quantas tarefas tenho"
+
+**Navegacao:**
+- "abrir CRM"
+- "ir para financeiro"
+- "abrir operacoes"
+
+Basta digitar o que precisa!`,
+
+  unknown: `Desculpe, nao entendi muito bem. Tente ser mais especifico ou diga **"ajuda"** para ver o que posso fazer.
+
+Exemplos:
+- "criar lead"
+- "qual meu saldo"
+- "abrir CRM"`,
+}
+
+// Explicacoes dos modulos
+const MODULE_EXPLANATIONS: Record<string, string> = {
+  crm: `O **CRM** (Customer Relationship Management) e onde voce gerencia seus leads e clientes.
+
+**Funcionalidades:**
+- Cadastrar novos leads
+- Acompanhar o funil de vendas
+- Registrar valor estimado de negocios
+- Adicionar notas e observacoes
+
+Diga "abrir CRM" para acessar ou "criar lead" para adicionar um novo contato.`,
+
+  financeiro: `O modulo **Financeiro** centraliza o controle de receitas e despesas.
+
+**Funcionalidades:**
+- Registrar receitas e entradas
+- Registrar despesas e saidas
+- Acompanhar saldo em tempo real
+- Categorizar lancamentos
+
+Diga "qual meu saldo" para ver o resumo ou "registrar receita" para adicionar.`,
+
+  operacoes: `O modulo de **Operacoes** e sua central de tarefas e atividades.
+
+**Funcionalidades:**
+- Criar e gerenciar tarefas
+- Definir prioridades (alta, media, baixa)
+- Acompanhar status (pendente, em andamento, concluido)
+- Definir prazos
+
+Diga "criar tarefa" para adicionar ou "listar tarefas" para ver pendentes.`,
+
+  dashboard: `O **Dashboard** e sua visao geral do negocio.
+
+Mostra em tempo real:
+- Metricas de leads e vendas
+- Resumo financeiro
+- Tarefas pendentes
+- Graficos e indicadores
+
+Diga "abrir dashboard" para acessar.`,
+
+  integracoes: `O modulo de **Integracoes** conecta o OpsCore com outras ferramentas.
+
+**Disponivel:**
+- WhatsApp Business - receba mensagens direto no sistema
+- Em breve: mais integracoes
+
+Diga "abrir integracoes" para configurar.`,
+}
 
 // Handler principal
 export async function POST(req: Request) {
-  console.log('[v0] Chat API called')
-  
   try {
     const body = await req.json()
-    console.log('[v0] Request body keys:', Object.keys(body))
-    
     const { messages } = body
     
-    if (!messages || !Array.isArray(messages)) {
-      console.log('[v0] Invalid messages format')
-      return new Response(
-        JSON.stringify({ error: 'Formato de mensagens invalido' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return Response.json({ error: 'Formato de mensagens invalido' }, { status: 400 })
     }
 
-    console.log('[v0] Messages count:', messages.length)
+    // Pegar a ultima mensagem do usuario
+    const lastMessage = messages[messages.length - 1]
+    let userText = ''
     
-    // Filtrar apenas mensagens com conteúdo válido
-    const validMessages = messages.filter(m => {
-      if (m.parts && Array.isArray(m.parts)) {
-        return m.parts.some((p: { type: string; text?: string }) => p.type === 'text' && p.text?.trim())
-      }
-      return false
-    })
-    
-    console.log('[v0] Valid messages count:', validMessages.length)
-
-    if (validMessages.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'Nenhuma mensagem valida' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
+    if (lastMessage.parts && Array.isArray(lastMessage.parts)) {
+      userText = lastMessage.parts
+        .filter((p: { type: string; text?: string }) => p.type === 'text')
+        .map((p: { type: string; text?: string }) => p.text || '')
+        .join(' ')
+        .trim()
+    } else if (lastMessage.content) {
+      userText = lastMessage.content
     }
 
-    // Converter mensagens do formato UIMessage para ModelMessage
-    console.log('[v0] Converting messages...')
-    const modelMessages = await convertToModelMessages(validMessages)
-    console.log('[v0] Converted messages count:', modelMessages.length)
+    if (!userText) {
+      return Response.json({ 
+        id: crypto.randomUUID(),
+        content: 'Nao entendi sua mensagem. Pode repetir?'
+      })
+    }
 
-    // Stream com OpenAI usando AI SDK
-    console.log('[v0] Starting streamText with model: openai/gpt-4o-mini')
-    const result = streamText({
-      model: 'openai/gpt-4o-mini',
-      system: SYSTEM_PROMPT,
-      messages: modelMessages,
-      temperature: 0.7,
-      onFinish: ({ text, usage }) => {
-        console.log('[v0] Stream finished. Text length:', text?.length || 0)
-        console.log('[v0] Token usage:', usage)
-      },
+    // Detectar intencao
+    const intentMatch = detectIntent(userText)
+    let response = ''
+    let navigateTo: string | undefined
+
+    // Processar com base na intencao
+    switch (intentMatch.intent) {
+      case 'greeting':
+        response = typeof RESPONSES.greeting === 'function' 
+          ? RESPONSES.greeting() 
+          : RESPONSES.greeting
+        break
+
+      case 'help':
+        response = RESPONSES.help as string
+        break
+
+      case 'navigate':
+        const target = extractNavigationTarget(userText)
+        if (target) {
+          response = `Abrindo **${target.name}**...`
+          navigateTo = target.path
+        } else {
+          response = 'Para onde voce quer ir? Diga "abrir CRM", "ir para financeiro", etc.'
+        }
+        break
+
+      case 'explain':
+        const module = extractModuleForExplanation(userText)
+        if (module && MODULE_EXPLANATIONS[module]) {
+          response = MODULE_EXPLANATIONS[module]
+        } else {
+          response = 'Sobre qual modulo voce quer saber? CRM, Financeiro, Operacoes, Dashboard ou Integracoes?'
+        }
+        break
+
+      // CRM Actions
+      case 'create_lead':
+        response = `Vamos criar um novo lead!
+
+Para cadastrar, preciso de algumas informacoes. Por favor, acesse o **CRM** e clique em "Novo Lead".
+
+Ou me diga o nome do lead que vou te ajudar a cadastrar.`
+        navigateTo = '/dashboard/crm'
+        break
+
+      case 'list_leads':
+        const leadsResult = await listLeads()
+        response = leadsResult.message
+        break
+
+      case 'count_leads':
+        const countLeadsResult = await countLeads()
+        response = countLeadsResult.message
+        break
+
+      // Financeiro Actions
+      case 'create_income':
+        response = `Vamos registrar uma nova **receita**!
+
+Acesse o modulo **Financeiro** para adicionar o lancamento com todos os detalhes.`
+        navigateTo = '/dashboard/financeiro'
+        break
+
+      case 'create_expense':
+        response = `Vamos registrar uma nova **despesa**!
+
+Acesse o modulo **Financeiro** para adicionar o lancamento com todos os detalhes.`
+        navigateTo = '/dashboard/financeiro'
+        break
+
+      case 'get_balance':
+      case 'get_financial_summary':
+        const balanceResult = await getBalance()
+        response = balanceResult.message
+        break
+
+      case 'list_incomes':
+        const incomesResult = await listFinances('receita')
+        response = incomesResult.message
+        break
+
+      case 'list_expenses':
+        const expensesResult = await listFinances('despesa')
+        response = expensesResult.message
+        break
+
+      // Operacoes Actions
+      case 'create_task':
+        response = `Vamos criar uma nova **tarefa**!
+
+Acesse o modulo **Operacoes** para adicionar a tarefa com titulo, descricao, prioridade e prazo.`
+        navigateTo = '/dashboard/operacoes'
+        break
+
+      case 'list_tasks':
+        const tasksResult = await listTasks()
+        response = tasksResult.message
+        break
+
+      case 'count_tasks':
+        const countTasksResult = await countTasks()
+        response = countTasksResult.message
+        break
+
+      // Empresa
+      case 'get_company':
+        const companyResult = await getCompany()
+        response = companyResult.message
+        break
+
+      case 'update_company':
+        response = `Para atualizar os dados da empresa, acesse **Configuracoes**.`
+        navigateTo = '/dashboard/configuracoes'
+        break
+
+      // Desconhecido
+      case 'unknown':
+      default:
+        // Tentar dar uma resposta contextual
+        if (intentMatch.params?.context === 'crm') {
+          response = `Parece que voce quer algo relacionado ao **CRM**. Tente:
+- "criar lead"
+- "listar leads"
+- "quantos leads tenho"
+- "abrir CRM"`
+        } else if (intentMatch.params?.context === 'financeiro') {
+          response = `Parece que voce quer algo relacionado ao **Financeiro**. Tente:
+- "registrar receita"
+- "registrar despesa"
+- "qual meu saldo"
+- "abrir financeiro"`
+        } else if (intentMatch.params?.context === 'operacoes') {
+          response = `Parece que voce quer algo relacionado a **Operacoes**. Tente:
+- "criar tarefa"
+- "listar tarefas"
+- "quantas tarefas tenho"
+- "abrir operacoes"`
+        } else {
+          response = RESPONSES.unknown as string
+        }
+        break
+    }
+
+    return Response.json({
+      id: crypto.randomUUID(),
+      content: response,
+      navigate: navigateTo,
     })
-
-    console.log('[v0] Returning stream response')
-    return result.toUIMessageStreamResponse()
 
   } catch (error) {
-    console.error('[v0] Chat API error:', error)
-    console.error('[v0] Error message:', error instanceof Error ? error.message : String(error))
-    
-    return new Response(
-      JSON.stringify({
-        error: 'Desculpe, ocorreu um erro ao processar sua mensagem.',
-        details: error instanceof Error ? error.message : String(error),
-      }),
-      { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    )
+    console.error('Chat API error:', error)
+    return Response.json({
+      id: crypto.randomUUID(),
+      content: 'Desculpe, ocorreu um erro. Por favor, tente novamente.',
+    }, { status: 500 })
   }
 }

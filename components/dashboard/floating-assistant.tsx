@@ -1,21 +1,25 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { Bot, Send, User, X, Sparkles, ArrowRight, Minimize2, Maximize2, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport, type UIMessage } from "ai"
 
-const WELCOME_MESSAGE = `Ola! Sou o **OpsBot**, seu assistente operacional com inteligencia artificial.
+interface Message {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  navigate?: string
+}
+
+const WELCOME_MESSAGE = `Ola! Sou o **OpsBot**, seu assistente operacional.
 
 Posso te ajudar a:
 - **Criar registros**: leads, receitas, despesas, tarefas
 - **Consultar dados**: saldo, numero de leads, tarefas pendentes
 - **Navegar**: "abrir CRM", "ir para financeiro"
-- **Responder perguntas**: sobre o OpsCore ou seu negocio
 
 O que voce gostaria de fazer?`
 
@@ -25,7 +29,7 @@ const QUICK_ACTIONS = [
   { label: "Nova tarefa", message: "criar tarefa" },
   { label: "Meu saldo", message: "qual meu saldo" },
   { label: "Abrir CRM", message: "abrir crm" },
-  { label: "Ajuda", message: "o que voce pode fazer?" },
+  { label: "Ajuda", message: "ajuda" },
 ]
 
 export function FloatingAssistant() {
@@ -34,74 +38,11 @@ export function FloatingAssistant() {
   const [isOpen, setIsOpen] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const [hasShownWelcome, setHasShownWelcome] = useState(false)
-  const [localInput, setLocalInput] = useState("")
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-
-  // Criar transport apenas uma vez
-  const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), [])
-
-  // useChat do AI SDK com streaming
-  const { messages, status, sendMessage, setMessages, error } = useChat({
-    transport,
-    initialMessages: [],
-    onError: (err) => {
-      console.error('[v0] useChat error:', err)
-    },
-  })
-  
-  // Log de erros
-  useEffect(() => {
-    if (error) {
-      console.error('[v0] Chat error state:', error)
-    }
-  }, [error])
-
-  const isLoading = status === "streaming" || status === "submitted"
-
-  // Extrair texto das partes da mensagem
-  const getMessageText = useCallback((msg: UIMessage): string => {
-    if (!msg.parts || !Array.isArray(msg.parts)) return ""
-    return msg.parts
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("")
-  }, [])
-
-  // Verificar se há navegação nas tool calls
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1]
-    if (lastMessage?.role === "assistant" && lastMessage.parts) {
-      for (const part of lastMessage.parts) {
-        if (part.type === "tool-invocation" && part.toolInvocation.toolName === "navigate") {
-          const result = part.toolInvocation.result
-          if (result?.navigate) {
-            setTimeout(() => {
-              router.push(result.navigate)
-            }, 1000)
-          }
-        }
-      }
-    }
-  }, [messages, router])
-
-  // Auto-abrir no primeiro acesso
-  useEffect(() => {
-    const isFirstAccess = searchParams.get("firstAccess") === "true"
-    if (isFirstAccess && !hasShownWelcome) {
-      setTimeout(() => {
-        setIsOpen(true)
-        setMessages([{
-          id: "welcome",
-          role: "assistant",
-          parts: [{ type: "text", text: WELCOME_MESSAGE }],
-          createdAt: new Date(),
-        } as UIMessage])
-        setHasShownWelcome(true)
-        window.history.replaceState({}, "", "/dashboard")
-      }, 800)
-    }
-  }, [searchParams, hasShownWelcome, setMessages])
 
   // Scroll para o final quando mensagens mudam
   useEffect(() => {
@@ -115,19 +56,82 @@ export function FloatingAssistant() {
     }
   }, [isOpen, isMinimized])
 
-  const handleSendMessage = useCallback((text: string) => {
+  // Auto-abrir no primeiro acesso
+  useEffect(() => {
+    const isFirstAccess = searchParams.get("firstAccess") === "true"
+    if (isFirstAccess && !hasShownWelcome) {
+      setTimeout(() => {
+        setIsOpen(true)
+        setMessages([{
+          id: "welcome",
+          role: "assistant",
+          content: WELCOME_MESSAGE,
+        }])
+        setHasShownWelcome(true)
+        window.history.replaceState({}, "", "/dashboard")
+      }, 800)
+    }
+  }, [searchParams, hasShownWelcome])
+
+  const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return
-    console.log('[v0] Sending message:', text.trim())
-    console.log('[v0] Current status:', status)
-    console.log('[v0] Current messages count:', messages.length)
-    setLocalInput("")
-    sendMessage({ text: text.trim() })
-    console.log('[v0] sendMessage called')
-  }, [isLoading, sendMessage, status, messages.length])
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text.trim(),
+    }
+
+    setMessages(prev => [...prev, userMessage])
+    setInput("")
+    setIsLoading(true)
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [...messages, userMessage].map(m => ({
+            id: m.id,
+            role: m.role,
+            parts: [{ type: "text", text: m.content }],
+          })),
+        }),
+      })
+
+      const data = await response.json()
+      
+      const assistantMessage: Message = {
+        id: data.id || crypto.randomUUID(),
+        role: "assistant",
+        content: data.content || "Desculpe, nao consegui processar sua mensagem.",
+        navigate: data.navigate,
+      }
+
+      setMessages(prev => [...prev, assistantMessage])
+
+      // Executar navegacao se houver comando
+      if (data.navigate) {
+        setTimeout(() => {
+          router.push(data.navigate)
+        }, 1200)
+      }
+    } catch (error) {
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "Desculpe, ocorreu um erro. Por favor, tente novamente.",
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsLoading(false)
+      inputRef.current?.focus()
+    }
+  }, [messages, isLoading, router])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    handleSendMessage(localInput)
+    sendMessage(input)
   }
 
   function handleOpen() {
@@ -136,9 +140,8 @@ export function FloatingAssistant() {
       setMessages([{
         id: "welcome",
         role: "assistant",
-        parts: [{ type: "text", text: WELCOME_MESSAGE }],
-        createdAt: new Date(),
-      } as UIMessage])
+        content: WELCOME_MESSAGE,
+      }])
     }
   }
 
@@ -146,10 +149,9 @@ export function FloatingAssistant() {
     setMessages([{
       id: "welcome-reset",
       role: "assistant",
-      parts: [{ type: "text", text: WELCOME_MESSAGE }],
-      createdAt: new Date(),
-    } as UIMessage])
-    setLocalInput("")
+      content: WELCOME_MESSAGE,
+    }])
+    setInput("")
   }
 
   // Renderizar markdown simples (negrito)
@@ -157,58 +159,6 @@ export function FloatingAssistant() {
     if (!text) return null
     return text.split(/\*\*(.*?)\*\*/g).map((part, i) => 
       i % 2 === 1 ? <strong key={i} className="font-semibold">{part}</strong> : part
-    )
-  }
-
-  // Renderizar mensagem com suporte a tool invocations
-  function renderMessage(message: UIMessage) {
-    const textParts = message.parts?.filter(p => p.type === "text") || []
-    const toolParts = message.parts?.filter(p => p.type === "tool-invocation") || []
-    
-    return (
-      <>
-        {textParts.map((part, i) => (
-          <div key={i} className="whitespace-pre-wrap leading-relaxed">
-            {renderMarkdown((part as { type: "text"; text: string }).text)}
-          </div>
-        ))}
-        {toolParts.map((part, i) => {
-          const toolInvocation = (part as { type: "tool-invocation"; toolInvocation: { toolName: string; state: string; result?: { message?: string; navigate?: string } } }).toolInvocation
-          
-          // Mostrar resultado da tool se disponível
-          if (toolInvocation.state === "output-available" && toolInvocation.result) {
-            if (toolInvocation.toolName === "navigate" && toolInvocation.result.navigate) {
-              return (
-                <div key={i} className="flex items-center gap-1.5 mt-2 pt-2 border-t border-current/10 text-[11px] opacity-80">
-                  <Spinner className="w-3 h-3" />
-                  Navegando...
-                </div>
-              )
-            }
-            if (toolInvocation.result.message) {
-              return (
-                <div key={i} className="mt-2 pt-2 border-t border-current/10">
-                  <div className="whitespace-pre-wrap leading-relaxed">
-                    {renderMarkdown(toolInvocation.result.message)}
-                  </div>
-                </div>
-              )
-            }
-          }
-          
-          // Mostrar loading enquanto tool está executando
-          if (toolInvocation.state === "input-available" || toolInvocation.state === "input-streaming") {
-            return (
-              <div key={i} className="flex items-center gap-1.5 mt-2 text-[11px] opacity-70">
-                <Spinner className="w-3 h-3" />
-                Processando...
-              </div>
-            )
-          }
-          
-          return null
-        })}
-      </>
     )
   }
 
@@ -251,7 +201,7 @@ export function FloatingAssistant() {
                   <p className="text-sm font-medium">OpsBot</p>
                   {!isMinimized && (
                     <p className="text-xs text-primary-foreground/70">
-                      {isLoading ? "Pensando..." : "Assistente com IA"}
+                      {isLoading ? "Pensando..." : "Assistente Operacional"}
                     </p>
                   )}
                 </div>
@@ -302,7 +252,7 @@ export function FloatingAssistant() {
                         {QUICK_ACTIONS.slice(0, 4).map((action) => (
                           <button
                             key={action.label}
-                            onClick={() => handleSendMessage(action.message)}
+                            onClick={() => sendMessage(action.message)}
                             className="flex items-center gap-1.5 px-3 py-2 bg-muted/50 hover:bg-muted rounded-lg text-xs text-left transition-colors"
                           >
                             <ArrowRight className="w-3 h-3 text-primary shrink-0" />
@@ -331,7 +281,15 @@ export function FloatingAssistant() {
                                 : "bg-muted text-foreground"
                             }`}
                           >
-                            {renderMessage(message)}
+                            <div className="whitespace-pre-wrap leading-relaxed">
+                              {renderMarkdown(message.content)}
+                            </div>
+                            {message.navigate && (
+                              <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-current/10 text-[11px] opacity-80">
+                                <Spinner className="w-3 h-3" />
+                                Navegando...
+                              </div>
+                            )}
                           </div>
 
                           {message.role === "user" && (
@@ -342,7 +300,7 @@ export function FloatingAssistant() {
                         </div>
                       ))}
                       
-                      {isLoading && messages[messages.length - 1]?.role === "user" && (
+                      {isLoading && (
                         <div className="flex gap-2">
                           <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center shrink-0">
                             <Bot className="w-3.5 h-3.5 text-primary-foreground" />
@@ -371,7 +329,7 @@ export function FloatingAssistant() {
                       {QUICK_ACTIONS.map((action) => (
                         <button
                           key={action.label}
-                          onClick={() => handleSendMessage(action.message)}
+                          onClick={() => sendMessage(action.message)}
                           className="shrink-0 px-2.5 py-1 bg-muted/50 hover:bg-muted rounded-full text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                         >
                           {action.label}
@@ -387,8 +345,8 @@ export function FloatingAssistant() {
                     <input
                       ref={inputRef}
                       type="text"
-                      value={localInput}
-                      onChange={(e) => setLocalInput(e.target.value)}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
                       placeholder="Digite sua mensagem..."
                       disabled={isLoading}
                       className="flex-1 px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 placeholder:text-muted-foreground"
@@ -396,7 +354,7 @@ export function FloatingAssistant() {
                     <Button 
                       type="submit" 
                       size="icon"
-                      disabled={!localInput.trim() || isLoading}
+                      disabled={!input.trim() || isLoading}
                       className="h-10 w-10 rounded-xl"
                     >
                       {isLoading ? <Spinner className="w-4 h-4" /> : <Send className="w-4 h-4" />}
