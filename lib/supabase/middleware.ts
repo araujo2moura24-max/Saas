@@ -56,15 +56,28 @@ export async function updateSession(request: NextRequest) {
 
   // Se está logado e tenta acessar páginas de auth, redireciona para dashboard
   if (user && (pathname.startsWith('/auth/login') || pathname.startsWith('/auth/sign-up'))) {
+    // Verificar se completou onboarding para decidir destino
+    const { data: onboarding } = await supabase
+      .from('onboarding')
+      .select('completed')
+      .eq('user_id', user.id)
+      .single()
+
     const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
+    url.pathname = onboarding?.completed ? '/dashboard' : '/onboarding'
     return NextResponse.redirect(url)
   }
 
-  // Se está logado e acessa a raiz, redireciona para dashboard
+  // Se está logado e acessa a raiz, redireciona para dashboard ou onboarding
   if (user && pathname === '/') {
+    const { data: onboarding } = await supabase
+      .from('onboarding')
+      .select('completed')
+      .eq('user_id', user.id)
+      .single()
+
     const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
+    url.pathname = onboarding?.completed ? '/dashboard' : '/onboarding'
     return NextResponse.redirect(url)
   }
 

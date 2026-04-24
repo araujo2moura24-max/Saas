@@ -11,15 +11,14 @@ export default async function DashboardPage() {
   }
 
   // Verificar se completou onboarding
-  const { data: onboarding, error: onboardingError } = await supabase
+  const { data: onboarding } = await supabase
     .from("onboarding")
     .select("completed")
     .eq("user_id", user.id)
     .single()
 
-  // Só redireciona se onboarding existe mas não está completo
-  // Se não existe ou deu erro, deixa continuar para não criar loop de redirect
-  if (onboarding && onboarding.completed !== true && !onboardingError) {
+  // Se não existe registro de onboarding ou não está completo, redireciona
+  if (!onboarding || onboarding.completed !== true) {
     redirect("/onboarding")
   }
 
